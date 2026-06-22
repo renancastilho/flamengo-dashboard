@@ -1,10 +1,8 @@
 from fastapi import APIRouter, Depends, Query, HTTPException
-from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy import select, desc
 from typing import Optional, List
-
-from app.core.database import get_db
-from app.models.models import NewsArticle, SportCategory
+from app.api.v1.deps import get_dashboard_facade
+from app.services.dashboard_facade import DashboardFacade
+from app.models.models import SportCategory
 from app.schemas.schemas import NewsArticleOut, NewsArticleCreate
 
 router = APIRouter()
@@ -16,41 +14,35 @@ async def list_news(
     featured: Optional[bool] = Query(None),
     limit: int = Query(20, le=100),
     offset: int = Query(0),
-    db: AsyncSession = Depends(get_db),
+    facade: DashboardFacade = Depends(get_dashboard_facade),
 ):
-    query = select(NewsArticle).order_by(desc(NewsArticle.published_at))
-    if sport:
-        query = query.where(NewsArticle.sport == sport)
-    if featured is not None:
-        query = query.where(NewsArticle.is_featured == featured)
-    query = query.limit(limit).offset(offset)
-    result = await db.execute(query)
-    return result.scalars().all()
+    return await facade.get_all_news(sport, featured, limit, offset)
 
 
 @router.get("/{news_id}", response_model=NewsArticleOut)
-async def get_news(news_id: int, db: AsyncSession = Depends(get_db)):
-    result = await db.execute(select(NewsArticle).where(NewsArticle.id == news_id))
-    article = result.scalar_one_or_none()
+async def get_news(
+    news_id: int,
+    facade: DashboardFacade = Depends(get_dashboard_facade),
+):
+    article = await facade.get_single_news(news_id)
     if not article:
         raise HTTPException(status_code=404, detail="Notícia não encontrada")
     return article
 
 
 @router.post("/", response_model=NewsArticleOut, status_code=201)
-async def create_news(data: NewsArticleCreate, db: AsyncSession = Depends(get_db)):
-    article = NewsArticle(**data.model_dump())
-    db.add(article)
-    await db.commit()
-    await db.refresh(article)
-    return article
+async def create_news(
+    data: NewsArticleCreate,
+    facade: DashboardFacade = Depends(get_dashboard_facade),
+):
+    return await facade.create_new_news(data)
 
 
 @router.delete("/{news_id}", status_code=204)
-async def delete_news(news_id: int, db: AsyncSession = Depends(get_db)):
-    result = await db.execute(select(NewsArticle).where(NewsArticle.id == news_id))
-    article = result.scalar_one_or_none()
-    if not article:
+async def delete_news(
+    news_id: int,
+    facade: DashboardFacade = Depends(get_dashboard_facade),
+):
+    success = await facade.remove_news(news_id)
+    if not success:
         raise HTTPException(status_code=404, detail="Notícia não encontrada")
-    await db.delete(article)
-    await db.commit()

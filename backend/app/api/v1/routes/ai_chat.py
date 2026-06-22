@@ -1,54 +1,28 @@
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, Depends, HTTPException
 from app.schemas.schemas import AIChatRequest, AIChatResponse
-from app.core.config import settings
-import anthropic
+from app.api.v1.deps import get_dashboard_facade
+from app.services.dashboard_facade import DashboardFacade
 
 router = APIRouter()
 
-SYSTEM_PROMPT = """Você é um assistente especialista no Clube de Regatas do Flamengo.
-Conhece profundamente a história do clube, todos os esportes que pratica (futebol, basquete,
-natação, vôlei, remo, eSports, futsal), títulos, jogadores históricos e atuais.
-Responda sempre em português brasileiro, de forma direta e precisa, em até 3 parágrafos."""
-
 
 @router.post("/chat", response_model=AIChatResponse)
-async def ai_chat(request: AIChatRequest):
-    if not settings.ANTHROPIC_API_KEY:
-        raise HTTPException(status_code=503, detail="Anthropic API key não configurada")
-
-    client = anthropic.Anthropic(api_key=settings.ANTHROPIC_API_KEY)
-
-    messages = [{"role": "user", "content": request.question}]
-    if request.context:
-        messages[0]["content"] = f"Contexto: {request.context}\n\n{request.question}"
-
-    response = client.messages.create(
-        model="claude-sonnet-4-6",
-        max_tokens=1000,
-        system=SYSTEM_PROMPT,
-        messages=messages,
-    )
-
-    return AIChatResponse(
-        answer=response.content[0].text,
-        tokens_used=response.usage.input_tokens + response.usage.output_tokens,
-    )
+async def ai_chat(
+    request: AIChatRequest,
+    facade: DashboardFacade = Depends(get_dashboard_facade)
+):
+    try:
+        return await facade.ask_ai_question(request.question, request.context)
+    except ValueError as e:
+        raise HTTPException(status_code=503, detail=str(e))
 
 
 @router.get("/summary/{sport}")
-async def sport_summary(sport: str):
-    if not settings.ANTHROPIC_API_KEY:
-        raise HTTPException(status_code=503, detail="Anthropic API key não configurada")
-
-    client = anthropic.Anthropic(api_key=settings.ANTHROPIC_API_KEY)
-    response = client.messages.create(
-        model="claude-sonnet-4-6",
-        max_tokens=500,
-        system=SYSTEM_PROMPT,
-        messages=[{
-            "role": "user",
-            "content": f"Faça um breve resumo do desempenho atual do Flamengo no {sport}, "
-                       f"em até 2 parágrafos curtos."
-        }],
-    )
-    return {"sport": sport, "summary": response.content[0].text}
+async def sport_summary(
+    sport: str,
+    facade: DashboardFacade = Depends(get_dashboard_facade)
+):
+    try:
+        return await facade.get_sport_ai_summary(sport)
+    except ValueError as e:
+        raise HTTPException(status_code=503, detail=str(e))
